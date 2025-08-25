@@ -1,0 +1,87 @@
+name: macOS Chrome — Single Release (Intel + ARM64)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 2 * * *"   # 每天 UTC 02:00 = 北京时间 10:00
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get latest versions (mac & mac_arm64)
+        id: ver
+        shell: bash
+        run: |
+          set -e
+          python3 - <<'PY' "$GITHUB_OUTPUT"
+import json, urllib.request, sys
+
+def latest_ver(url):
+    req = urllib.request.Request(url, headers={"User-Agent":"mac-chrome-mirror"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = json.load(r)
+    return data["versions"][0]["version"]
+
+mac = latest_ver("https://versionhistory.googleapis.com/v1/chrome/platforms/mac/channels/stable/versions")
+arm = latest_ver("https://versionhistory.googleapis.com/v1/chrome/platforms/mac_arm64/channels/stable/versions")
+
+def key(v): return [int(x) for x in v.split(".")]
+ver = max([mac, arm], key=key)
+
+out = sys.argv[1]
+with open(out, "a") as f:
+    f.write(f"version={ver}\n")
+print("mac:", mac)
+print("arm:", arm)
+print("final:", ver)
+PY
+
+      - name: Decide tag & check existence
+        id: tag
+        shell: bash
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Using tag: $TAG"
+
+      - name: Download universal DMG once
+        if: steps.tag.outputs.exists == 'false'
+        shell: bash
+        run: |
+          set -e
+          curl -L --fail --retry 3 --retry-delay 2 \
+            -o googlechrome.dmg https://dl.google.com/chrome/mac/stable/GGRO/googlechrome.dmg
+          cp googlechrome.dmg googlechrome-intel.dmg
+          cp googlechrome.dmg googlechrome-arm64.dmg
+          ls -lh *.dmg
+
+      - name: Create/Update single Release with two assets
+        if: steps.tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: macOS Chrome ${{ steps.tag.outputs.tag }}
+          body: |
+            Stable channel (mac & mac_arm64).
+            Note: Chrome DMG is Universal; two files are identical, labeled for convenience.
+          files: |
+            googlechrome-intel.dmg
+            googlechrome-arm64.dmg
+
+      - name: Artifact backup (optional)
+        if: steps.tag.outputs.exists == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-chrome-${{ steps.tag.outputs.tag }}
+          path: |
+            googlechrome-intel.dmg
+            googlechrome-arm64.dmg
