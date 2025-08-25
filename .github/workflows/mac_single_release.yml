@@ -12,33 +12,14 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Get latest versions (mac & mac_arm64)
+      - name: Checkout repo (to get fetch_macos.py)
+        uses: actions/checkout@v4
+
+      - name: Get latest version via script (VersionHistory API)
         id: ver
-        shell: bash
         run: |
-          set -e
-          python3 - <<'PY' "$GITHUB_OUTPUT"
-import json, urllib.request, sys
-
-def latest_ver(url):
-    req = urllib.request.Request(url, headers={"User-Agent":"mac-chrome-mirror"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        data = json.load(r)
-    return data["versions"][0]["version"]
-
-mac = latest_ver("https://versionhistory.googleapis.com/v1/chrome/platforms/mac/channels/stable/versions")
-arm = latest_ver("https://versionhistory.googleapis.com/v1/chrome/platforms/mac_arm64/channels/stable/versions")
-
-def key(v): return [int(x) for x in v.split(".")]
-ver = max([mac, arm], key=key)
-
-out = sys.argv[1]
-with open(out, "a") as f:
-    f.write(f"version={ver}\n")
-print("mac:", mac)
-print("arm:", arm)
-print("final:", ver)
-PY
+          python3 fetch_macos.py "$GITHUB_OUTPUT"
+          echo "Resolved version: ${{ steps.ver.outputs.version || 'unknown' }}"
 
       - name: Decide tag & check existence
         id: tag
